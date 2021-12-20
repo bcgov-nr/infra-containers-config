@@ -1,0 +1,6 @@
+---
+install_user: 'wwwadm'
+httpd_common_dir: '/sw_ux/httpd-common'
+httpd_common_scripts_dir: '{{ httpd_common_dir }}/scripts'
+httpd_log_fixer_script_name: 'httpd-log-fixer.sh'
+httpd_clean_semaphores_script_name: 'httpd-clean-semaphores.sh'

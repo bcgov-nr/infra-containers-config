@@ -1,0 +1,30 @@
+- name: 'Pause for git update'
+  pause:
+    prompt: |-
+
+      *** ACTION REQUIRED ***
+      -----------------------
+      Have you done a git update before running this playbook?
+      If no, CTRL+C to quit/abort and do the git update, otherwise press ENTER to continue
+
+- name: 'Setup/check that Ansible sudo script is present for user'
+  copy:
+    src: ansible-sudo-script.sh
+    dest: ~/
+    mode: 0755
+
+# Check the user's umask.  If it is set to 0077, then the unarchive module will
+# unpack the package with permissions that are not suitable.
+# -----------------------------------------------------------------------------
+- name: 'umask check'
+  shell: "umask"
+  register: umask_output
+
+- name: 'umask alert for {{ ansible_user_id }}'
+  fail:
+    msg: >
+      Connecting user's umask needs to be changed.
+      It is currently set to {{ umask_output.stdout }},
+      but should be 0022 in order for the installation to be properly configured.
+      You can change this in your .bashrc file by adding: umask 0022"
+  when: umask_output.stdout.find ('077') > 0

@@ -1,0 +1,12 @@
+---
+# PROD forward proxy - forwardproxy.nrs.bcgov
+- hosts: conversion
+
+  # Include Ansible vault file variables
+  # ------------------------------------
+  vars_files:
+    - ~/.vault/vault.yml
+
+  roles:
+    - name: 00-util/ansible-apache-pre-reqs
+    - name: forward-proxy/srv-conversion-tiny

@@ -1,0 +1,86 @@
+---
+#######################################################################################
+# Setup facts and directories for the siteminder dump
+#######################################################################################
+
+- name: 'Set fact - siteminder dump timestamp'
+  set_fact:
+    siteminder_dump_timestamp: "{{ ansible_date_time.date }}T{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}{{ ansible_date_time.second }}"
+
+- name: 'Set fact - siteminder dump local destination folder name'
+  set_fact:
+    local_dest_dir_path: "/vagrant/files-downloaded/{{ siteminder_dump_timestamp }}-{{ ansible_host }}-siteminder"
+
+- name: 'Set fact - siteminder dump remote temp directory path'
+  set_fact:
+    remote_temp_dir_path: "{{ siteminder_parent_dir }}/{{ siteminder_dump_timestamp }}-siteminder-dump"
+
+- name: 'Set fact - siteminder dump remote temp directory name'
+  set_fact:
+    remote_temp_dir_name: "{{ remote_temp_dir_path | basename}}"
+
+- name: 'Create local destination folder for siteminder dump files'
+  file:
+    path: "{{ local_dest_dir_path }}"
+    state: directory
+    mode: 0777
+  delegate_to: localhost
+
+- name: 'Create temp directory on server for siteminder dump files'
+  file:
+    path: "{{ remote_temp_dir_path }}"
+    state: directory
+    mode: 0755
+  become: yes
+  become_user: wwwadm
+
+#######################################################################################
+# Create bash script on server and run to generate dated siteminder dump archive
+#######################################################################################
+
+- name: 'Create siteminder dump bash script on server'
+  template:
+    src: "templates/siteminder-dump.sh"
+    dest: "{{ siteminder_parent_dir }}/{{ remote_temp_dir_name }}.sh"
+    mode: 0744
+  become: yes
+  become_user: wwwadm
+
+- name: 'Run siteminder dump bash script'
+  shell: "cd {{ siteminder_parent_dir }} && ./{{ remote_temp_dir_name }}.sh"
+  become: yes
+  become_user: wwwadm
+
+- name: 'Remove siteminder dump bash script'
+  file:
+    path: "{{ siteminder_parent_dir }}/{{ remote_temp_dir_name }}.sh"
+    state: absent
+  become: yes
+  become_user: wwwadm
+
+#######################################################################################
+# Fetch siteminder dump archive from server, unpack, and cleanup
+#######################################################################################
+
+- name: 'Get siteminder dump archive from remote server to local workstation'
+  fetch:
+    src: "{{ siteminder_parent_dir }}/{{ remote_temp_dir_name }}.tar.gz"
+    dest: "{{ local_dest_dir_path }}/"
+    flat: yes
+  ignore_errors: yes
+
+- name: 'Remove siteminder dump archive from remote server'
+  file:
+    path: "{{ siteminder_parent_dir }}/{{ remote_temp_dir_name }}.tar.gz"
+    state: absent
+  ignore_errors: yes
+  become: yes
+  become_user: wwwadm
+
+# There may be red error/failure messages on this task due to problems creating symlinks, this is expected and not a problem.
+- name: 'Unpack siteminder dump archive on local workstation'
+  unarchive:
+    src: "{{ local_dest_dir_path }}/{{ remote_temp_dir_name }}.tar.gz"
+    dest: "{{ local_dest_dir_path }}/"
+    extra_opts: [--strip-components=1]
+  delegate_to: localhost
