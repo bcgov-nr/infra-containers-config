@@ -1,0 +1,20 @@
+---
+# defaults file for self-signed-cert
+ssc_dir:                       "{{ apache_instance_dir }}/tls"
+ssc_cert_dir:                  "{{ ssc_dir }}/certs"
+ssc_key_dir:                   "{{ ssc_dir }}/private"
+ssc_user:                       "wwwadm"
+
+ssc_key_filename:               "ssc.key"
+ssc_key:                        "{{ ssc_key_dir }}/{{ ssc_key_filename }}"
+ssc_separate_key_pass:          false
+# this is now set in main.yml using set_fact
+# ssc_key_pass:                   "{{ ansible_fqdn | to_uuid | password_hash('sha512') }}"
+
+ssc_certificate_alias:          "{{ ansible_fqdn }}"
+ssc_certificate_age:            3650
+ssc_certificate_common_name:    "{{ ansible_fqdn }}"
+ssc_certificate_subject:        "/C=CA/ST=BC/L=Victoria/O=IMB/OU=CSNR/CN={{ ssc_certificate_common_name }}"
+ssc_certificate_options:        "-x509 -sha256 -nodes -x509 -subj \"{{ ssc_certificate_subject }}\" -days {{ ssc_certificate_age }}"
+ssc_certificate_filename:       'ssc.pem'
+ssc_certificate:                "{{ ssc_cert_dir }}/{{ ssc_certificate_filename }}"

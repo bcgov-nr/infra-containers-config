@@ -1,0 +1,28 @@
+- name: 'Check/create httpd-common dir'
+  file:
+    path: "{{ item }}"
+    owner: "{{ apache_group }}"
+    group: "{{ apache_group }}"
+    state: directory
+    mode: 0755
+  become: yes
+  become_user: wwwadm
+  with_items:
+    - "{{ httpd_common_dir }}"
+    - "{{ httpd_common_scripts_dir }}"
+
+- name: 'Setup/check that httpd-log-fixer.sh script is present'
+  copy:
+    src: "{{ httpd_log_fixer_script_name }}"
+    dest: "{{ httpd_common_scripts_dir }}/"
+    mode: 0755
+  become: yes
+  become_user: wwwadm
+
+- name: 'Setup/check that httpd-clean-semaphores.sh script is present'
+  copy:
+    src: "{{ httpd_clean_semaphores_script_name }}"
+    dest: "{{ httpd_common_scripts_dir }}/"
+    mode: 0755
+  become: yes
+  become_user: wwwadm

@@ -1,0 +1,77 @@
+---
+# tasks file for self-signed-cert
+
+# this will generate a random password like "YpsuraEkxxYjqQS" and store it as a fact, to prevent it from being
+# re-generated each time the variable is called
+- name: 'Generate random keystore password'
+  set_fact:
+    ssc_keystore_pass: "{{ lookup('password', '/dev/null length=15 chars=ascii_letters') }}"
+  run_once: no
+
+- name: 'Generate random key password'
+  set_fact:
+    ssc_key_pass: "{{ ssc_separate_key_pass | ternary(lookup('password', '/dev/null length=15 chars=ascii_letters'), ssc_keystore_pass) }}"
+  run_once: no
+
+- name: 'Check/create directory {{ ssc_dir }}'
+  file:
+    path: "{{ ssc_dir }}"
+    state: directory
+    mode: 0755
+  become: yes
+  become_user: "{{ ssc_user }}"
+
+- name: 'Check/create directory {{ ssc_cert_dir }}'
+  file:
+    path: "{{ ssc_cert_dir }}"
+    state: directory
+    mode: 0755
+  become: yes
+  become_user: "{{ ssc_user }}"
+
+- name: 'Check/create directory {{ ssc_key_dir }}'
+  file:
+    path: "{{ ssc_key_dir }}"
+    state: directory
+    mode: 0750
+  become: yes
+  become_user: "{{ ssc_user }}"
+
+- name: 'Remove old self-signed cert'
+  file:
+    path: "{{ ssc_certificate }}"
+    state: absent
+  become: yes
+  become_user: "{{ ssc_user }}"
+#  ignore_errors: yes
+
+- name: 'Remove old self-signed cert private key'
+  file:
+    path: "{{ ssc_key }}"
+    state: absent
+  become: yes
+  become_user: "{{ ssc_user }}"
+#  ignore_errors: yes
+
+- name: 'Generate a self-signed private key/certificate'
+  command: "openssl req -newkey rsa:2048 {{ ssc_certificate_options }} -keyout {{ ssc_key }} -out {{ ssc_certificate }} -batch"
+  args:
+    creates: "{{ ssc_key }}"
+  become: yes
+  become_user: "{{ ssc_user }}"
+
+- name: 'Change self-signed cert permissions'
+  file:
+    path: "{{ ssc_certificate }}"
+    state: file
+    mode: 0444
+  become: yes
+  become_user: "{{ ssc_user }}"
+
+- name: 'Change self-signed cert private key permissions'
+  file:
+    path: "{{ ssc_key }}"
+    state: file
+    mode: 0440
+  become: yes
+  become_user: "{{ ssc_user }}"

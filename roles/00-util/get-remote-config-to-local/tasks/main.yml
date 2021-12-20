@@ -1,0 +1,98 @@
+---
+#######################################################################################
+# Setup facts and directories for the httpd dump
+#######################################################################################
+
+- name: 'Set fact - httpd dump timestamp'
+  set_fact:
+    httpd_dump_timestamp: "{{ ansible_date_time.date }}T{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}{{ ansible_date_time.second }}"
+
+- name: 'Set fact - httpd dump local destination folder name'
+  set_fact:
+    local_dest_dir_path: "/vagrant/files-downloaded/{{ httpd_dump_timestamp }}-{{ ansible_host }}"
+
+- name: 'Set fact - httpd dump remote temp directory path'
+  set_fact:
+    remote_temp_dir_path: "{{ httpd_instances_dir }}/{{ httpd_dump_timestamp }}-httpd-dump"
+
+- name: 'Set fact - httpd dump remote temp directory name'
+  set_fact:
+    remote_temp_dir_name: "{{ remote_temp_dir_path | basename}}"
+
+- name: 'Create local destination folder for httpd dump files'
+  file:
+    path: "{{ local_dest_dir_path }}"
+    state: directory
+    mode: 0777
+  delegate_to: localhost
+
+- name: 'Create temp directory on server for httpd dump files'
+  file:
+    path: "{{ remote_temp_dir_path }}"
+    state: directory
+    mode: 0755
+  become: yes
+  become_user: wwwadm
+
+- name: 'Get httpd instances on server so we can run some of the following tasks against each httpd instance'
+  shell: "cd {{ httpd_instances_dir }}; find . -maxdepth 1 -type d \\( -name \"httpd\" -o -name \"httpd[0-9][0-9]\" \\) | cut -d'/' -f2- | sort"
+  register: httpd_instances
+  ignore_errors: yes
+  become: yes
+  become_user: wwwadm
+
+#- name: 'Debug httpd_instances'
+#  debug: var=httpd_instances.stdout
+
+#######################################################################################
+# Create bash script on server and run to generate dated httpd dump archive
+#######################################################################################
+
+- name: 'Create httpd dump bash script on server'
+  template:
+    src: "templates/httpd-dump.sh"
+    dest: "{{ httpd_instances_dir }}/{{ remote_temp_dir_name }}.sh"
+    mode: 0744
+  become: yes
+  become_user: wwwadm
+
+- name: 'Run httpd dump bash script'
+  shell: "cd {{ httpd_instances_dir }} && ./{{ remote_temp_dir_name }}.sh"
+  become: yes
+  become_user: wwwadm
+
+- name: 'Remove httpd dump bash script'
+  file:
+    path: "{{ httpd_instances_dir }}/{{ remote_temp_dir_name }}.sh"
+    state: absent
+  become: yes
+  become_user: wwwadm
+
+#######################################################################################
+# Fetch httpd dump archive from server, unpack, and cleanup
+#######################################################################################
+
+- name: 'Get httpd dump archive from remote server to local workstation'
+  fetch:
+    src: "{{ httpd_instances_dir }}/{{ remote_temp_dir_name }}.tar.gz"
+    dest: "{{ local_dest_dir_path }}/"
+    flat: yes
+  ignore_errors: yes
+  become: yes
+  become_user: wwwadm
+
+- name: 'Remove httpd dump archive from remote server'
+  file:
+    path: "{{ httpd_instances_dir }}/{{ remote_temp_dir_name }}.tar.gz"
+    state: absent
+  ignore_errors: yes
+  become: yes
+  become_user: wwwadm
+
+# There may be red error/failure messages on this task due to problems creating symlinks, this is expected and not a problem.
+- name: 'Unpack httpd dump archive on local workstation'
+  unarchive:
+    src: "{{ local_dest_dir_path }}/{{ remote_temp_dir_name }}.tar.gz"
+    dest: "{{ local_dest_dir_path }}/"
+    extra_opts: [--strip-components=1]
+  delegate_to: localhost

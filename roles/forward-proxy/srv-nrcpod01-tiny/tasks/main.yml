@@ -1,0 +1,77 @@
+- name: 'Set configuration files'
+  copy:
+    src: "files/conf/{{ item.path }}"
+    dest: "/sw_ux/podman/tinyproxy/{{ item.path }}"
+    mode: 0644
+  with_filetree: files/conf/
+  become: yes
+  become_user: wwwadm
+
+- name: 'Set scripts'
+  copy:
+    src: "files/bin/{{ item.path }}"
+    dest: "/sw_ux/podman/tinyproxy/bin/{{ item.path }}"
+    mode: 0755
+  with_filetree: files/bin/
+  become: yes
+  become_user: wwwadm
+
+- name: 'Create temporary directory'
+  tempfile:
+    path: ~/
+    state: directory
+    prefix: ".ansible."
+    suffix: "-deleteme"
+  register: tempdir_01
+  no_log: true
+
+- name: 'Create temporary file'
+  tempfile:
+    path: "{{ tempdir_01.path }}/"
+    state: file
+  register: tempfile_01
+  no_log: true
+
+- name: 'Populate temporary file'
+  copy:
+    content: "{{ ssh_pass }}\n"
+    dest: "{{ tempfile_01.path }}"
+  no_log: true
+
+- name: 'Stop tinyproxy #1 systemctl - added to stop processes see below'
+  raw: ~/ansible-sudo-script.sh "systemctl stop tinyproxy" <{{ tempfile_01.path }}
+  no_log: true
+  ignore_errors: yes
+
+- name: 'Stop tinyproxy #2 proxyctl - added to stop old processes missed by systemctl above, see below'
+  shell: "/sw_ux/tinyproxy/bin/proxyctl stop"
+  become: yes
+  become_user: wwwsvr
+  ignore_errors: yes
+
+- name: 'Start tinyproxy container'
+  raw: ~/ansible-sudo-script.sh "systemctl --user start container-tinyproxy" <{{ tempfile_01.path }}
+  no_log: true
+  ignore_errors: yes
+
+- name: 'Remove temporary directory'
+  file:
+    path: "{{ tempdir_01.path }}"
+    state: absent
+  no_log: true
+  ignore_errors: yes
+  when: tempdir_01.path is defined
+
+# following from temp directory creation above, delete any similarly named directories (same prefix and suffix)
+- name: 'Remove other temporary directories if any exist'
+  shell: rm -rf ~/.ansible.*-deleteme
+  args:
+    warn: no
+  no_log: true
+  ignore_errors: yes
+
+- name: 'logrotated config'
+  raw: ~/ansible-sudo-script.sh "logrotate -s /var/log/logstatus /sw_ux/podman/tinyproxy/bin/tinyproxy_logrotate.conf" <{{ tempfile_01.path }}
+  no_log: true
+  ignore_errors: yes
+

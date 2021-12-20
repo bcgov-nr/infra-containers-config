@@ -1,0 +1,118 @@
+# Domain White List for allowing connections out to the web.
+# Write one value (domain name) per line
+.ec.gc.ca
+.gov.bc.ca
+.*apache.org
+.arcgis.com
+.artifactoryonline.com
+.atlassian.com
+.prod.public.atl-paas.net
+.bambora.com
+.beanstream.com
+.bintray.com
+.cygwin.com
+.digicert.com
+.*drupal.org
+.entrust.com
+.oracle.com
+.cloudfront.net
+.postescanada-canadapost.ca
+.google.com
+.meteo.gc.ca
+.microsoft.com
+.nrcan.gc.ca
+.*bitbucket.org
+.clamav.net
+download.eclipse.org
+timestamp.entrust.net
+download.java.net
+repository.jboss.org
+#Jenkins Update center mirrors
+ftp-nyc.osuosl.org
+ftp-chi.osuosl.org
+archives.jenkins-ci.org
+updates.jenkins-ci.org
+mirrors.jenkins-ci.org
+repo.jenkins-ci.org
+get.jenkins.io
+updates.jenkins.io
+mirror.azure.jenkins.io
+serverion.com
+mirror.xmission.com
+xmission.org
+repo1.maven.org
+central.maven.org
+jasperreports.sourceforge.net/maven2
+repo.springsource.org
+maven.springframework.org
+maven-repository.windward.net
+mvn.vividsolutions.com
+mirror.opencsw.org
+repository.liferay.com
+repo.boundlessgeo.com
+dd.weather.gc.ca
+.osgeo.org
+apps.ltsa.ca
+.*metacpan.org
+cpan.strawberryperl.com
+cpan.pair.com
+cpan.org
+scm.selkirksystems.com
+#ARTIFACTOR-2
+nexus.selkirksystems.com
+api.console.aporeto.com
+.sonatype.com
+
+# Added the following for B. Ferguson work on LEGACY.bcgov - Kris C.
+pypi.python.org
+pypi.org
+pythonhosted.org
+registry.npmjs.org
+.bower.io
+google-fonts.azurewebsites.net
+.cloudflare.com
+.mapbox.com
+github-production-release.*amazonaws.com
+.*github.com
+.githubusercontent.com
+.*yarnpkg.com
+.*elastic.co
+
+# Added the following for Micha and RoadENG application - Tolu A.
+softreelicenseserver.azurewebsites.net
+
+# Added the following for MindBreeze Feed in Drupal - DJD June12/19
+mbsacal3.search.gcpe.bcgov
+.*gww.search.gov.bc.ca
+drupal.org
+
+# Added the following for Clecio for Jira/Bitbucket to Openshift - Tolu A.
+.*pathfinder.gov.bc.ca
+
+# Added DataBC Geoservers for CWM-337
+openmaps.gov.bc.ca
+sgw-sos.api.gov.bc.ca
+
+# WFRM-806 - nodejs
+.*nodejs.org
+
+# AQTSMSS-84 - bcmoe-prod.aquaticinformatics.net
+.*bcmoe-prod.aquaticinformatics.net
+
+# DISPATCH-590: Added bcwildfireservices.com
+.*bcwildfireservices.com
+
+.*eccc-msc.github.io
+.*webservices.crd.bc.ca
+
+# Added for Wazuh POC Ticket SD-25577
+.*docker.com
+.*docker.io
+.*canonical.com
+.*redhat.com
+.*debian.org
+.*nvd.nist.gov
+.*feed.wazuh.com
+
+# Added for Vault/HashiCorp, per ONETEAM-1363
+.*hashicorp.com
