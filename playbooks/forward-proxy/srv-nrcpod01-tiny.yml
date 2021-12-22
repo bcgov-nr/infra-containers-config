@@ -1,5 +1,5 @@
 ---
-# TEST forward proxy - test-forwardproxy.nrs.bcgov
+# TEST forward proxy - test-logproxy.nrs.bcgov
 - hosts: nrcpod01
 
   # Include Ansible vault file variables
