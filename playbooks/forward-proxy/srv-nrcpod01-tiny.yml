@@ -1,11 +1,13 @@
 ---
 # TEST forward proxy - test-logproxy.nrs.bcgov
-- hosts: nrcpod01
+- hosts: payload
+
+# nrcpod01
 
   # Include Ansible vault file variables
   # ------------------------------------
   vars_files:
-    - ~/.vault/vault.yml
+  - ~/.vault/vault.yml
 
   roles:
     - name: 00-util/ansible-apache-pre-reqs
