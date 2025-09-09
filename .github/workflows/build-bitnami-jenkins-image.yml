@@ -1,7 +1,7 @@
 name: Build Bitnami Jenkins Image
 
 on:
- push:
+  push:
     branches:
       - main
     tags:
@@ -11,6 +11,7 @@ on:
       - "**.md"
       - "**.yml"
       - "**.yaml"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
