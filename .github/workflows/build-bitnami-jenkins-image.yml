@@ -36,7 +36,7 @@ jobs:
 
       - name: Clone bitnami/containers
         run: |
-          git clone --no-checkout https://github.com:bitnami/containers.git bitnami-containers
+          git clone --no-checkout https://github.com/bitnami/containers.git bitnami-containers
           cd bitnami-containers
           git sparse-checkout init --cone
           git sparse-checkout set bitnami/jenkins
