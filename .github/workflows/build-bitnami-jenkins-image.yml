@@ -39,7 +39,7 @@ jobs:
           cd bitnami-containers
 
           # Search for commit releasing this image version
-          MATCHING_COMMIT=$(git log --pretty=format:"%H %s" --grep="Release jenkins container version $IMAGE_TAG" | head -n 1 | cut -d' ' -f1)
+          MATCHING_COMMIT=$(git log --pretty=format:"%H %s" --grep="$IMAGE_TAG" | head -n 1 | cut -d' ' -f1)
 
           if [[ -z "$MATCHING_COMMIT" ]]; then
             echo "❌ Could not find commit for Jenkins tag $IMAGE_TAG"
