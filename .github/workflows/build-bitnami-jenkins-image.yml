@@ -47,7 +47,7 @@ jobs:
           fi
 
           echo "✅ Found commit: $MATCHING_COMMIT"
-          echo "commit=$MATCHING_COMMIT" >> "$GITHUB_OUTPUT
+          echo "commit=$MATCHING_COMMIT" >> "$GITHUB_OUTPUT"
 
       - name: Sparse checkout bitnami/jenkins at exact commit
         run: |
