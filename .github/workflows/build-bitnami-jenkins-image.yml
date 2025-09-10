@@ -68,10 +68,17 @@ jobs:
 
           echo "✅ Checked out commit $COMMIT with only bitnami/jenkins"
 
-      - name: Build Bitnami Jenkins image
+      - name: Build Bitnami Jenkins image with version and latest tags
         run: |
           cd bitnami-containers/bitnami/jenkins/2/debian-12
-          docker build -t ghcr.io/${{ github.repository }}/jenkins:${{ github.event.inputs.jenkins_tag }} .
+
+          IMAGE_NAME=ghcr.io/${{ github.repository }}/jenkins
+          TAG=${{ github.event.inputs.jenkins_tag }}
+
+          docker build \
+            -t "$IMAGE_NAME:$TAG" \
+            -t "$IMAGE_NAME:latest" \
+            .
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -80,6 +87,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push Jenkins image to this repo's GHCR
+      - name: Push Jenkins image to GHCR
         run: |
-          docker push ghcr.io/${{ github.repository }}/jenkins:${{ github.event.inputs.jenkins_tag }}
+          IMAGE_NAME=ghcr.io/${{ github.repository }}/jenkins
+          TAG=${{ github.event.inputs.jenkins_tag }}
+
+          docker push "$IMAGE_NAME:$TAG"
+          docker push "$IMAGE_NAME:latest"
