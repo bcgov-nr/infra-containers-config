@@ -56,4 +56,4 @@ jobs:
 
       - name: Push Jenkins image to this repo's GHCR
         run: |
-          docker push ghcr.io/${{ github.repository_owner }}/jenkins:${IMAGE_TAG}
+          docker push ghcr.io/${{ github.repository }}/jenkins:${IMAGE_TAG}
