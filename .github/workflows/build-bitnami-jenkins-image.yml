@@ -53,6 +53,12 @@ jobs:
         run: |
           COMMIT=${{ steps.find_commit.outputs.commit }}
 
+          # Remove the dir if it exists
+          if [ -d "bitnami-containers" ]; then
+            echo "⚠️ Directory 'bitnami-containers' already exists. Removing it..."
+            rm -rf bitnami-containers
+          fi
+
           git clone --no-checkout https://github.com/bitnami/containers.git bitnami-containers
           cd bitnami-containers
 
