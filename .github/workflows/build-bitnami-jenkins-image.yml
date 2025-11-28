@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       jenkins_tag:
-        description: "Bitnami Jenkins image tag (e.g. 2.516.2-debian-12-r0)"
+        description: "Bitnami Jenkins image tag"
         required: true
-        default: "2.516.2-debian-12-r0"
+        default: "2.528.2-debian-12-r0"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
