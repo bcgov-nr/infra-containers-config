@@ -6,7 +6,7 @@ on:
       jenkins_tag:
         description: "Bitnami Jenkins image tag"
         required: true
-        default: "2.528.3-debian-12-r0"
+        default: "2.528.3-debian-12-r2"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
