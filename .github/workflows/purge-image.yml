@@ -1,0 +1,17 @@
+name: Cleanup GHCR Docker Images
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # Weekly on Sunday
+  workflow_dispatch:     # Allows manual trigger
+
+jobs:
+  clean-package:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Delete old package versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: 'infra-containers-config/jenkins'
+          package-type: 'container'
+          min-versions-to-keep: 10
