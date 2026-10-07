@@ -3,11 +3,23 @@ name: Cleanup GHCR Docker Images
 on:
   workflow_dispatch:     # Allows manual trigger
 
+permissions: {}
+
 jobs:
   clean-package:
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     steps:
-      - name: Delete old package versions
+      - name: Delete untagged package versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: 'infra-containers-config/jenkins'
+          package-type: 'container'
+          delete-only-untagged-versions: 'true'
+          min-versions-to-keep: 0
+
+      - name: Keep the 10 latest tagged package versions
         uses: actions/delete-package-versions@v5
         with:
           package-name: 'infra-containers-config/jenkins'
