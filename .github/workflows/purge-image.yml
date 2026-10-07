@@ -1,13 +1,11 @@
 name: Cleanup GHCR Docker Images
 
 on:
-  schedule:
-    - cron: '0 0 * * 0' # Weekly on Sunday
   workflow_dispatch:     # Allows manual trigger
 
 jobs:
   clean-package:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-latest
     steps:
       - name: Delete old package versions
         uses: actions/delete-package-versions@v5
