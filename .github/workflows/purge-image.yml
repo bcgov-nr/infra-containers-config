@@ -19,7 +19,7 @@ jobs:
           delete-only-untagged-versions: 'true'
           min-versions-to-keep: 0
 
-      - name: Keep the 10 latest tagged package versions
+      - name: Keep the 5 latest tagged package versions
         uses: actions/delete-package-versions@v5
         with:
           package-name: 'infra-containers-config/jenkins'
