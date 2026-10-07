@@ -4,93 +4,226 @@ on:
   workflow_dispatch:
     inputs:
       jenkins_tag:
-        description: "Bitnami Jenkins image tag"
+        description: "Bitnami Jenkins image tag (leave blank for the latest release)"
+        required: false
+        default: ""
+        type: string
+      build_mode:
+        description: "Build without publishing, or publish the image to GHCR"
         required: true
-        default: "2.580.1-debian-12-r2"
+        type: choice
+        options:
+          - build-only
+          - publish
+        default: build-only
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  build-image:
+  resolve-release:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+    outputs:
+      image_tag: ${{ steps.resolve.outputs.image_tag }}
+      commit: ${{ steps.resolve.outputs.commit }}
+      update_latest: ${{ steps.resolve.outputs.update_latest }}
 
     steps:
-      - name: Checkout this repository
-        uses: actions/checkout@v6
+      - name: Resolve Jenkins release
+        id: resolve
+        env:
+          REQUESTED_TAG: ${{ inputs.jenkins_tag }}
+        run: |
+          set -euo pipefail
+          git clone --filter=tree:0 --no-checkout https://github.com/bitnami/containers.git bitnami-containers
+          cd bitnami-containers
+
+          RELEASE_REGEX='^\[bitnami/jenkins\] Release ([0-9]+\.[0-9]+\.[0-9]+-debian-12-r[0-9]+) \(#[0-9]+\)$'
+          LATEST_LINE=$(git log --all --extended-regexp --grep="$RELEASE_REGEX" --format='%H%x09%s' --max-count=1)
+          if [[ -z "$LATEST_LINE" ]]; then
+            echo "::error::Could not find the latest Bitnami Jenkins Debian 12 release"
+            exit 1
+          fi
+          IFS=$'\t' read -r LATEST_COMMIT LATEST_SUBJECT <<< "$LATEST_LINE"
+          if [[ "$LATEST_SUBJECT" =~ $RELEASE_REGEX ]]; then
+            LATEST_TAG="${BASH_REMATCH[1]}"
+          else
+            echo "::error::Could not parse the latest Bitnami release commit: $LATEST_SUBJECT"
+            exit 1
+          fi
+
+          if [[ -n "$REQUESTED_TAG" ]]; then
+            if [[ ! "$REQUESTED_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+-debian-12-r[0-9]+$ ]]; then
+              echo "::error::Invalid Jenkins image tag: $REQUESTED_TAG"
+              exit 1
+            fi
+
+            RELEASE_LINE=$(git log --all --fixed-strings --grep="[bitnami/jenkins] Release ${REQUESTED_TAG} (#" --format='%H%x09%s' --max-count=1)
+            if [[ -z "$RELEASE_LINE" ]]; then
+              echo "::error::No Bitnami Jenkins release commit found for $REQUESTED_TAG"
+              exit 1
+            fi
+
+            IFS=$'\t' read -r RELEASE_COMMIT RELEASE_SUBJECT <<< "$RELEASE_LINE"
+            if [[ ! "$RELEASE_SUBJECT" =~ $RELEASE_REGEX ]] || [[ "${BASH_REMATCH[1]}" != "$REQUESTED_TAG" ]]; then
+              echo "::error::The matching commit is not an exact Bitnami release for $REQUESTED_TAG"
+              exit 1
+            fi
+            IMAGE_TAG="$REQUESTED_TAG"
+            UPDATE_LATEST=false
+            if [[ "$IMAGE_TAG" == "$LATEST_TAG" ]]; then
+              UPDATE_LATEST=true
+            fi
+          else
+            RELEASE_COMMIT="$LATEST_COMMIT"
+            IMAGE_TAG="$LATEST_TAG"
+            UPDATE_LATEST=true
+          fi
+
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "commit=$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "update_latest=$UPDATE_LATEST" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Resolved Bitnami Jenkins release"
+            echo "- Image tag: \`$IMAGE_TAG\`"
+            echo "- Source commit: \`$RELEASE_COMMIT\`"
+            echo "- Update latest alias: \`$UPDATE_LATEST\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build-only:
+    if: inputs.build_mode == 'build-only'
+    needs: resolve-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out Bitnami source at exact release commit
+        env:
+          COMMIT: ${{ needs.resolve-release.outputs.commit }}
+        run: |
+          git clone --filter=tree:0 --no-checkout https://github.com/bitnami/containers.git bitnami-containers
+          git -C bitnami-containers sparse-checkout init --cone
+          git -C bitnami-containers sparse-checkout set bitnami/jenkins
+          git -C bitnami-containers checkout "$COMMIT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Find commit for Jenkins image tag
-        id: find_commit
-        run: |
-          IMAGE_TAG="${{ github.event.inputs.jenkins_tag }}"
-
-          echo "Looking for commit associated with image tag: $IMAGE_TAG"
-
-          # Search commit logs for the release message
-          COMMIT=$(git ls-remote https://github.com/bitnami/containers.git HEAD | cut -f1)
-          git clone --filter=tree:0 https://github.com/bitnami/containers.git bitnami-containers
-          cd bitnami-containers
-
-          # Search for commit releasing this image version
-          MATCHING_COMMIT=$(git log --pretty=format:"%H %s" --grep="$IMAGE_TAG" | head -n 1 | cut -d' ' -f1)
-
-          if [[ -z "$MATCHING_COMMIT" ]]; then
-            echo "❌ Could not find commit for Jenkins tag $IMAGE_TAG"
-            exit 1
-          fi
-
-          echo "✅ Found commit: $MATCHING_COMMIT"
-          echo "commit=$MATCHING_COMMIT" >> "$GITHUB_OUTPUT"
-
-      - name: Sparse checkout bitnami/jenkins at exact commit
-        run: |
-          COMMIT=${{ steps.find_commit.outputs.commit }}
-
-          # Remove the dir if it exists
-          if [ -d "bitnami-containers" ]; then
-            echo "⚠️ Directory 'bitnami-containers' already exists. Removing it..."
-            rm -rf bitnami-containers
-          fi
-
-          git clone --no-checkout https://github.com/bitnami/containers.git bitnami-containers
-          cd bitnami-containers
-
-          git sparse-checkout init --cone
-          git sparse-checkout set bitnami/jenkins
-          git checkout "$COMMIT"
-
-          echo "✅ Checked out commit $COMMIT with only bitnami/jenkins"
-
-      - name: Build Bitnami Jenkins image with version and latest tags
+      - name: Build Bitnami Jenkins image without publishing
+        env:
+          IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
         run: |
           cd bitnami-containers/bitnami/jenkins/2/debian-12
+          IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}/jenkins"
+          docker buildx build --load -t "$IMAGE_NAME:$IMAGE_TAG" .
+          echo "Built \`$IMAGE_NAME:$IMAGE_TAG\` locally; no registry login or push was performed." >> "$GITHUB_STEP_SUMMARY"
 
-          IMAGE_NAME=ghcr.io/${{ github.repository }}/jenkins
-          TAG=${{ github.event.inputs.jenkins_tag }}
+  publish-image:
+    if: inputs.build_mode == 'publish'
+    needs: resolve-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check whether the versioned image tag already exists
+        id: version-tag
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
+          IMAGE_PATH: ${{ github.repository }}/jenkins
+        run: |
+          set -euo pipefail
+          IMAGE_PATH="${IMAGE_PATH,,}"
+          REGISTRY_TOKEN=$(curl -fsSL --user "${GITHUB_ACTOR}:${GHCR_TOKEN}" \
+            --get \
+            --data-urlencode "service=ghcr.io" \
+            --data-urlencode "scope=repository:${IMAGE_PATH}:pull" \
+            https://ghcr.io/token | jq -er '.token // .access_token')
+          MANIFEST_STATUS=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${REGISTRY_TOKEN}" \
+            --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/${IMAGE_PATH}/manifests/${IMAGE_TAG}")
 
-          docker build \
-            -t "$IMAGE_NAME:$TAG" \
-            -t "$IMAGE_NAME:latest" \
-            .
+          case "$MANIFEST_STATUS" in
+            200)
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              echo "Versioned image tag \`$IMAGE_TAG\` already exists; it will not be overwritten." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            404)
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::Could not verify whether GHCR image tag $IMAGE_TAG exists (HTTP $MANIFEST_STATUS)."
+              exit 1
+              ;;
+          esac
+
+      - name: Check out Bitnami source at exact release commit
+        if: steps.version-tag.outputs.exists != 'true'
+        env:
+          COMMIT: ${{ needs.resolve-release.outputs.commit }}
+        run: |
+          git clone --filter=tree:0 --no-checkout https://github.com/bitnami/containers.git bitnami-containers
+          git -C bitnami-containers sparse-checkout init --cone
+          git -C bitnami-containers sparse-checkout set bitnami/jenkins
+          git -C bitnami-containers checkout "$COMMIT"
+
+      - name: Set up Docker Buildx
+        if: steps.version-tag.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build Bitnami Jenkins image
+        if: steps.version-tag.outputs.exists != 'true'
+        env:
+          IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
+        run: |
+          cd bitnami-containers/bitnami/jenkins/2/debian-12
+          IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}/jenkins"
+          docker buildx build --load -t "$IMAGE_NAME:$IMAGE_TAG" .
 
       - name: Log in to GitHub Container Registry
+        if: steps.version-tag.outputs.exists != 'true' || needs.resolve-release.outputs.update_latest == 'true'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push Jenkins image to GHCR
+      - name: Push versioned Jenkins image to GHCR
+        if: steps.version-tag.outputs.exists != 'true'
+        env:
+          IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
         run: |
-          IMAGE_NAME=ghcr.io/${{ github.repository }}/jenkins
-          TAG=${{ github.event.inputs.jenkins_tag }}
+          IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}/jenkins"
+          docker push "$IMAGE_NAME:$IMAGE_TAG"
 
-          docker push "$IMAGE_NAME:$TAG"
-          docker push "$IMAGE_NAME:latest"
+      - name: Update latest alias for the newest upstream release
+        if: needs.resolve-release.outputs.update_latest == 'true'
+        env:
+          IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
+          VERSIONED_TAG_EXISTS: ${{ steps.version-tag.outputs.exists }}
+        run: |
+          IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}/jenkins"
+          if [[ "$VERSIONED_TAG_EXISTS" == "true" ]]; then
+            docker pull "$IMAGE_NAME:$IMAGE_TAG"
+          fi
+          docker tag "$IMAGE_NAME:$IMAGE_TAG" "$IMAGE_NAME:latest"
+            docker push "$IMAGE_NAME:latest"
+
+      - name: Summarize image publish
+        if: success()
+        env:
+          IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
+          UPDATE_LATEST: ${{ needs.resolve-release.outputs.update_latest }}
+        run: |
+          echo "- Published versioned image: \`$IMAGE_TAG\`" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$UPDATE_LATEST" == "true" ]]; then
+            echo "- Updated alias: \`latest\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Left alias unchanged: \`latest\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Image publish workflow completed." >> "$GITHUB_STEP_SUMMARY"
