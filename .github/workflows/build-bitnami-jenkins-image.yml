@@ -108,6 +108,11 @@ jobs:
           git -C bitnami-containers sparse-checkout init --cone
           git -C bitnami-containers sparse-checkout set bitnami/jenkins
           git -C bitnami-containers checkout "$COMMIT"
+          ACTUAL_COMMIT=$(git -C bitnami-containers rev-parse HEAD)
+          if [[ "$ACTUAL_COMMIT" != "$COMMIT" ]]; then
+            echo "::error::Checked out $ACTUAL_COMMIT instead of resolved commit $COMMIT"
+            exit 1
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -115,11 +120,27 @@ jobs:
       - name: Build Bitnami Jenkins image without publishing
         env:
           IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
+          SOURCE_COMMIT: ${{ needs.resolve-release.outputs.commit }}
         run: |
           cd bitnami-containers/bitnami/jenkins/2/debian-12
           IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}/jenkins"
-          docker buildx build --load -t "$IMAGE_NAME:$IMAGE_TAG" .
-          echo "Built \`$IMAGE_NAME:$IMAGE_TAG\` locally; no registry login or push was performed." >> "$GITHUB_STEP_SUMMARY"
+          docker buildx build --load \
+            --label "org.opencontainers.image.source=https://github.com/bitnami/containers" \
+            --label "org.opencontainers.image.revision=$SOURCE_COMMIT" \
+            --label "org.opencontainers.image.version=$IMAGE_TAG" \
+            -t "$IMAGE_NAME:$IMAGE_TAG" .
+
+          IMAGE_LABELS=$(docker image inspect --format '{{json .Config.Labels}}' "$IMAGE_NAME:$IMAGE_TAG")
+          jq -e --arg commit "$SOURCE_COMMIT" --arg tag "$IMAGE_TAG" \
+            '."org.opencontainers.image.source" == "https://github.com/bitnami/containers" and ."org.opencontainers.image.revision" == $commit and ."org.opencontainers.image.version" == $tag' \
+            <<< "$IMAGE_LABELS" >/dev/null
+          IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE_NAME:$IMAGE_TAG")
+          {
+            echo "Built \`$IMAGE_NAME:$IMAGE_TAG\` without publishing."
+            echo "- Source commit verified: \`$SOURCE_COMMIT\`"
+            echo "- Image config digest: \`$IMAGE_ID\`"
+            echo "- OCI source, revision, and version labels verified."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   publish-image:
     if: inputs.build_mode == 'publish'
@@ -143,14 +164,22 @@ jobs:
             --data-urlencode "service=ghcr.io" \
             --data-urlencode "scope=repository:${IMAGE_PATH}:pull" \
             https://ghcr.io/token | jq -er '.token // .access_token')
-          MANIFEST_STATUS=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+          MANIFEST_HEADERS=$(mktemp)
+          MANIFEST_STATUS=$(curl --silent --show-error --head --dump-header "$MANIFEST_HEADERS" --output /dev/null --write-out '%{http_code}' \
             --header "Authorization: Bearer ${REGISTRY_TOKEN}" \
             --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
             "https://ghcr.io/v2/${IMAGE_PATH}/manifests/${IMAGE_TAG}")
+          MANIFEST_DIGEST=$(awk 'tolower($1) == "docker-content-digest:" { gsub("\r", "", $2); digest = $2 } END { print digest }' "$MANIFEST_HEADERS")
+          rm -f "$MANIFEST_HEADERS"
 
           case "$MANIFEST_STATUS" in
             200)
+              if [[ ! "$MANIFEST_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+                echo "::error::GHCR returned an invalid manifest digest for $IMAGE_TAG"
+                exit 1
+              fi
               echo "exists=true" >> "$GITHUB_OUTPUT"
+              echo "digest=$MANIFEST_DIGEST" >> "$GITHUB_OUTPUT"
               echo "Versioned image tag \`$IMAGE_TAG\` already exists; it will not be overwritten." >> "$GITHUB_STEP_SUMMARY"
               ;;
             404)
@@ -162,6 +191,26 @@ jobs:
               ;;
           esac
 
+      - name: Summarize publish plan
+        env:
+          IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
+          TAG_EXISTS: ${{ steps.version-tag.outputs.exists }}
+          UPDATE_LATEST: ${{ needs.resolve-release.outputs.update_latest }}
+        run: |
+          if [[ "$TAG_EXISTS" == "true" && "$UPDATE_LATEST" != "true" ]]; then
+            echo "### Publish plan: no-op" >> "$GITHUB_STEP_SUMMARY"
+            echo "The versioned image \`$IMAGE_TAG\` already exists and this is not the newest release. No build or push will occur." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$TAG_EXISTS" == "true" ]]; then
+            echo "### Publish plan: update latest alias only" >> "$GITHUB_STEP_SUMMARY"
+            echo "The versioned image \`$IMAGE_TAG\` already exists and will not be overwritten. The existing image will be assigned to \`latest\`." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$UPDATE_LATEST" == "true" ]]; then
+            echo "### Publish plan: build and publish" >> "$GITHUB_STEP_SUMMARY"
+            echo "Build and publish \`$IMAGE_TAG\`, then assign the same image to \`latest\`." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Publish plan: build and publish versioned tag" >> "$GITHUB_STEP_SUMMARY"
+            echo "Build and publish \`$IMAGE_TAG\`. The \`latest\` alias will remain unchanged." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Check out Bitnami source at exact release commit
         if: steps.version-tag.outputs.exists != 'true'
         env:
@@ -171,19 +220,15 @@ jobs:
           git -C bitnami-containers sparse-checkout init --cone
           git -C bitnami-containers sparse-checkout set bitnami/jenkins
           git -C bitnami-containers checkout "$COMMIT"
+          ACTUAL_COMMIT=$(git -C bitnami-containers rev-parse HEAD)
+          if [[ "$ACTUAL_COMMIT" != "$COMMIT" ]]; then
+            echo "::error::Checked out $ACTUAL_COMMIT instead of resolved commit $COMMIT"
+            exit 1
+          fi
 
       - name: Set up Docker Buildx
-        if: steps.version-tag.outputs.exists != 'true'
+        if: steps.version-tag.outputs.exists != 'true' || needs.resolve-release.outputs.update_latest == 'true'
         uses: docker/setup-buildx-action@v4
-
-      - name: Build Bitnami Jenkins image
-        if: steps.version-tag.outputs.exists != 'true'
-        env:
-          IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
-        run: |
-          cd bitnami-containers/bitnami/jenkins/2/debian-12
-          IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}/jenkins"
-          docker buildx build --load -t "$IMAGE_NAME:$IMAGE_TAG" .
 
       - name: Log in to GitHub Container Registry
         if: steps.version-tag.outputs.exists != 'true' || needs.resolve-release.outputs.update_latest == 'true'
@@ -193,37 +238,104 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push versioned Jenkins image to GHCR
+      - name: Build Bitnami Jenkins image
+        if: steps.version-tag.outputs.exists != 'true'
+        id: build
+        env:
+          IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
+          SOURCE_COMMIT: ${{ needs.resolve-release.outputs.commit }}
+          UPDATE_LATEST: ${{ needs.resolve-release.outputs.update_latest }}
+        run: |
+          cd bitnami-containers/bitnami/jenkins/2/debian-12
+          IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}/jenkins"
+          TAGS=(-t "$IMAGE_NAME:$IMAGE_TAG")
+          if [[ "$UPDATE_LATEST" == "true" ]]; then
+            TAGS+=(-t "$IMAGE_NAME:latest")
+          fi
+          docker buildx build --push --metadata-file "$RUNNER_TEMP/build-metadata.json" \
+            --label "org.opencontainers.image.source=https://github.com/bitnami/containers" \
+            --label "org.opencontainers.image.revision=$SOURCE_COMMIT" \
+            --label "org.opencontainers.image.version=$IMAGE_TAG" \
+            "${TAGS[@]}" .
+          BUILT_DIGEST=$(jq -er '.["containerimage.digest"]' "$RUNNER_TEMP/build-metadata.json")
+          if [[ ! "$BUILT_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::Buildx did not return a valid published image digest"
+            exit 1
+          fi
+          echo "digest=$BUILT_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Verify published image provenance labels
         if: steps.version-tag.outputs.exists != 'true'
         env:
           IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
+          SOURCE_COMMIT: ${{ needs.resolve-release.outputs.commit }}
         run: |
           IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}/jenkins"
-          docker push "$IMAGE_NAME:$IMAGE_TAG"
+          docker pull "$IMAGE_NAME:$IMAGE_TAG"
+          IMAGE_LABELS=$(docker image inspect --format '{{json .Config.Labels}}' "$IMAGE_NAME:$IMAGE_TAG")
+          jq -e --arg commit "$SOURCE_COMMIT" --arg tag "$IMAGE_TAG" \
+            '."org.opencontainers.image.source" == "https://github.com/bitnami/containers" and ."org.opencontainers.image.revision" == $commit and ."org.opencontainers.image.version" == $tag' \
+            <<< "$IMAGE_LABELS" >/dev/null
+          echo "Verified OCI source, revision, and version labels on the published image." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Update latest alias for the newest upstream release
-        if: needs.resolve-release.outputs.update_latest == 'true'
+        if: steps.version-tag.outputs.exists == 'true' && needs.resolve-release.outputs.update_latest == 'true'
         env:
           IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
-          VERSIONED_TAG_EXISTS: ${{ steps.version-tag.outputs.exists }}
         run: |
           IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}/jenkins"
-          if [[ "$VERSIONED_TAG_EXISTS" == "true" ]]; then
-            docker pull "$IMAGE_NAME:$IMAGE_TAG"
+          docker buildx imagetools create --prefer-index=false --tag "$IMAGE_NAME:latest" "$IMAGE_NAME:$IMAGE_TAG"
+
+      - name: Verify published GHCR digest
+        if: steps.version-tag.outputs.exists != 'true'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
+          IMAGE_PATH: ${{ github.repository }}/jenkins
+          EXPECTED_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          IMAGE_PATH="${IMAGE_PATH,,}"
+          REGISTRY_TOKEN=$(curl -fsSL --user "${GITHUB_ACTOR}:${GHCR_TOKEN}" \
+            --get \
+            --data-urlencode "service=ghcr.io" \
+            --data-urlencode "scope=repository:${IMAGE_PATH}:pull" \
+            https://ghcr.io/token | jq -er '.token // .access_token')
+
+          MANIFEST_HEADERS=$(mktemp)
+          MANIFEST_STATUS=$(curl --silent --show-error --head --dump-header "$MANIFEST_HEADERS" --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${REGISTRY_TOKEN}" \
+            --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/${IMAGE_PATH}/manifests/${IMAGE_TAG}")
+          PUBLISHED_DIGEST=$(awk 'tolower($1) == "docker-content-digest:" { gsub("\r", "", $2); digest = $2 } END { print digest }' "$MANIFEST_HEADERS")
+          rm -f "$MANIFEST_HEADERS"
+          if [[ "$MANIFEST_STATUS" != "200" || "$PUBLISHED_DIGEST" != "$EXPECTED_DIGEST" ]]; then
+            echo "::error::GHCR digest verification failed for $IMAGE_TAG (HTTP $MANIFEST_STATUS, expected $EXPECTED_DIGEST, got $PUBLISHED_DIGEST)"
+            exit 1
           fi
-          docker tag "$IMAGE_NAME:$IMAGE_TAG" "$IMAGE_NAME:latest"
-            docker push "$IMAGE_NAME:latest"
+          echo "Verified versioned tag \`$IMAGE_TAG\` at \`$PUBLISHED_DIGEST\`." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summarize image publish
         if: success()
         env:
           IMAGE_TAG: ${{ needs.resolve-release.outputs.image_tag }}
           UPDATE_LATEST: ${{ needs.resolve-release.outputs.update_latest }}
+          TAG_EXISTS: ${{ steps.version-tag.outputs.exists }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest || steps.version-tag.outputs.digest }}
         run: |
-          echo "- Published versioned image: \`$IMAGE_TAG\`" >> "$GITHUB_STEP_SUMMARY"
-          if [[ "$UPDATE_LATEST" == "true" ]]; then
-            echo "- Updated alias: \`latest\`" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$TAG_EXISTS" == "true" && "$UPDATE_LATEST" != "true" ]]; then
+            echo "### Publish result: no-op" >> "$GITHUB_STEP_SUMMARY"
+            echo "The versioned image already existed; no build or push was performed." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$TAG_EXISTS" == "true" ]]; then
+            echo "### Publish result: latest alias updated" >> "$GITHUB_STEP_SUMMARY"
+            echo "The existing versioned image was not overwritten; the \`latest\` alias update command succeeded." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "- Left alias unchanged: \`latest\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Publish result: image published" >> "$GITHUB_STEP_SUMMARY"
+            echo "Published versioned image \`$IMAGE_TAG\` at \`$IMAGE_DIGEST\`." >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$UPDATE_LATEST" == "true" ]]; then
+              echo "The \`latest\` alias update command succeeded." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "Left \`latest\` unchanged." >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
           echo "Image publish workflow completed." >> "$GITHUB_STEP_SUMMARY"
