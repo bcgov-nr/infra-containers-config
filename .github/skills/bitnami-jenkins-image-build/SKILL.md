@@ -1,10 +1,10 @@
 ---
-name: bitnami-jenkins-image-rollout
+name: bitnami-jenkins-image-build
 description: 'Use when running or updating the manually triggered Bitnami Jenkins image build workflow in infra-containers-config.'
 argument-hint: 'Optional Bitnami Jenkins image tag; leave blank to build the latest release'
 ---
 
-# Bitnami Jenkins Image Tag Update
+# Bitnami Jenkins Image Build
 
 Use this skill to build a Bitnami Jenkins image through the `Build Bitnami Jenkins Image` GitHub Actions workflow in `infra-containers-config`. The default build-only mode does not log in to GHCR or publish an image. Publishing is a separate explicit mode. The workflow does not update consuming repositories, open PRs, or deploy.
 
