@@ -90,7 +90,11 @@ jobs:
             echo "### Resolved Bitnami Jenkins release"
             echo "- Image tag: \`$IMAGE_TAG\`"
             echo "- Source commit: \`$RELEASE_COMMIT\`"
-            echo "- Update latest alias: \`$UPDATE_LATEST\`"
+            if [[ "$UPDATE_LATEST" == "true" ]]; then
+              echo "- Latest alias in publish mode: point to \`$IMAGE_TAG\` (newest upstream release)."
+            else
+              echo "- Latest alias in publish mode: leave unchanged (selected release is not the newest upstream release)."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
   build-only:
