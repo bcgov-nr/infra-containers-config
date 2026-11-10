@@ -26,6 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
     outputs:
       image_tag: ${{ steps.resolve.outputs.image_tag }}
       commit: ${{ steps.resolve.outputs.commit }}
@@ -84,6 +85,7 @@ jobs:
           fi
 
           echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
           echo "commit=$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
           echo "update_latest=$UPDATE_LATEST" >> "$GITHUB_OUTPUT"
           {
@@ -96,6 +98,77 @@ jobs:
               echo "- Latest alias in publish mode: leave unchanged (selected release is not the newest upstream release)."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compare upstream release with GHCR latest
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST_TAG: ${{ steps.resolve.outputs.latest_tag }}
+          IMAGE_PATH: ${{ github.repository }}/jenkins
+        run: |
+          set -euo pipefail
+          IMAGE_PATH=$(printf '%s' "$IMAGE_PATH" | tr '[:upper:]' '[:lower:]')
+          REGISTRY_TOKEN=$(curl -fsSL --user "${GITHUB_ACTOR}:${GHCR_TOKEN}" \
+            --get \
+            --data-urlencode "service=ghcr.io" \
+            --data-urlencode "scope=repository:${IMAGE_PATH}:pull" \
+            https://ghcr.io/token | jq -er '.token // .access_token')
+          echo "::add-mask::$REGISTRY_TOKEN"
+          MANIFEST_ACCEPT='application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json'
+          MANIFEST_FILE=$(mktemp)
+          trap 'rm -f "$MANIFEST_FILE"' EXIT
+          MANIFEST_STATUS=$(curl --silent --show-error --location \
+            --output "$MANIFEST_FILE" --write-out '%{http_code}' \
+            --header "Authorization: Bearer $REGISTRY_TOKEN" \
+            --header "Accept: $MANIFEST_ACCEPT" \
+            "https://ghcr.io/v2/${IMAGE_PATH}/manifests/latest")
+          {
+            echo "### Upstream release compared with GHCR latest"
+            echo "- Newest upstream release: \`$LATEST_TAG\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          case "$MANIFEST_STATUS" in
+            200) ;;
+            404)
+              echo "- No latest image exists in GHCR yet." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+            *)
+              echo "::error::Could not read GHCR latest image (HTTP $MANIFEST_STATUS)."
+              exit 1
+              ;;
+          esac
+
+          if jq -e 'has("manifests")' "$MANIFEST_FILE" >/dev/null; then
+            MANIFEST_DIGEST=$(jq -r '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")][0].digest' "$MANIFEST_FILE")
+            if [[ ! "$MANIFEST_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              echo "::error::GHCR latest has no valid linux/amd64 image manifest."
+              exit 1
+            fi
+            curl -fsSL --header "Authorization: Bearer $REGISTRY_TOKEN" \
+              --header "Accept: $MANIFEST_ACCEPT" \
+              "https://ghcr.io/v2/${IMAGE_PATH}/manifests/${MANIFEST_DIGEST}" \
+              --output "$MANIFEST_FILE"
+          fi
+          CONFIG_DIGEST=$(jq -r '.config.digest' "$MANIFEST_FILE")
+          if [[ ! "$CONFIG_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::GHCR latest has an invalid image config digest."
+            exit 1
+          fi
+          CURRENT_TAG=$(curl -fsSL --header "Authorization: Bearer $REGISTRY_TOKEN" \
+            "https://ghcr.io/v2/${IMAGE_PATH}/blobs/${CONFIG_DIGEST}" \
+            | jq -r '.config.Labels["org.opencontainers.image.version"]')
+          TAG_REGEX='^[0-9]+\.[0-9]+\.[0-9]+-debian-12-r[0-9]+$'
+          if [[ ! "$CURRENT_TAG" =~ $TAG_REGEX || ! "$LATEST_TAG" =~ $TAG_REGEX ]]; then
+            echo "::error::Cannot compare versions: GHCR latest and upstream must have valid Bitnami Jenkins Debian 12 version labels."
+            exit 1
+          fi
+          echo "- GHCR latest version: \`$CURRENT_TAG\`" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$CURRENT_TAG" == "$LATEST_TAG" ]]; then
+            echo "- **Already current.**" >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$(printf '%s\n' "$CURRENT_TAG" "$LATEST_TAG" | sort -V | tail -n 1)" == "$LATEST_TAG" ]]; then
+            echo "- **Update available:** \`$CURRENT_TAG\` -> \`$LATEST_TAG\`." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- **GHCR is newer** than the newest upstream release found." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   build-only:
     if: inputs.build_mode == 'build-only'
