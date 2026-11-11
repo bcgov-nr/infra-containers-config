@@ -17,6 +17,27 @@ Both leverage Ansible to connect and supply necessary operations to manage respe
 ---
 At the time of writing, this repo only supports the tinyproxy container.  Able to be used in production, also serving as a template for other containers such as Fluent-bit, tomcat, activemq, etc.
 
+### Bitnami Jenkins image builds
+
+The manually triggered **Build Bitnami Jenkins Image** workflow compares the newest
+upstream Debian 12 release with the `org.opencontainers.image.version` label on
+`ghcr.io/bcgov-nr/infra-containers-config/jenkins:latest` before building. Both
+`build-only` and `publish` modes use read-only GHCR access for this comparison.
+The job summary reports whether an update is available, the image is already
+current, GHCR is newer, or no `latest` image exists. Jenkins version components
+and the Bitnami revision are compared numerically (for example, `r10` is newer
+than `r2`). Registry errors and missing or invalid version labels fail the check.
+For an image index, the comparison reads the Linux AMD64 image's label, matching
+the workflow's build platform.
+
+The comparison always uses the newest upstream release, even when `jenkins_tag`
+selects an older release. It is informational and does not change the existing
+build/publish decisions or update deployments. The default `build-only` mode
+does not log in to Docker or publish images.
+
+Run the comparison's mocked-registry tests with
+`python3 -m unittest discover -s tests -p 'test_jenkins_release_comparison.py'`.
+
 ### Authentication
 ---
 The authentication currently works [using Ansible Vault](https://docs.ansible.com/ansible/latest/user_guide/vault.html) to encrypt user creditials, to decrypt them when the playbooks.  
