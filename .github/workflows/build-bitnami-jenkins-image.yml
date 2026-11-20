@@ -18,7 +18,7 @@ on:
         default: build-only
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.repository }}-jenkins-ghcr
   cancel-in-progress: false
 
 jobs:

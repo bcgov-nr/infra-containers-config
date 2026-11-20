@@ -38,6 +38,31 @@ does not log in to Docker or publish images.
 Run the comparison's mocked-registry tests with
 `python3 -m unittest discover -s tests -p 'test_jenkins_release_comparison.py'`.
 
+### Jenkins image cleanup
+
+The manually triggered **Cleanup GHCR Docker Images** workflow keeps the five
+newest tagged package versions (by creation time), the version carrying `latest`
+even if older, and every manifest referenced by those images. Buildx publishes
+an OCI index with separate image and provenance-attestation manifests; GHCR
+shows these dependencies as untagged `sha256:` versions. Untagged does not mean
+unused, and deleting those versions can break a tagged image's OpenShift pulls.
+
+Cleanup recursively follows image indexes and OCI subject references before
+deleting obsolete tagged versions and unreferenced untagged versions. Registry
+errors, invalid or missing retained manifests, or a changed package snapshot
+abort planning before any deletion. Retained manifests are checked again after
+deletion. Build and cleanup workflows share a concurrency group so they cannot
+publish and delete simultaneously; do not manually modify the package during
+cleanup. Older deployed tags outside the retention set are not protected.
+
+Cleanup does not repair previously damaged images. If a retained image is
+already missing its child manifest, remove and republish that broken version
+before retrying cleanup. An existing versioned tag is not rebuilt by the publish
+workflow, so a successful no-op or alias update cannot repair missing children.
+
+Run the cleanup's mocked-registry tests with
+`node --test tests/test_jenkins_image_cleanup.cjs`.
+
 ### Authentication
 ---
 The authentication currently works [using Ansible Vault](https://docs.ansible.com/ansible/latest/user_guide/vault.html) to encrypt user creditials, to decrypt them when the playbooks.  
